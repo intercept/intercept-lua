@@ -1,5 +1,6 @@
 #include <intercept.hpp>
 #include <sol.hpp>
+#include "LuaManager.hpp"
 
 
 int intercept::api_version() { //This is required for the plugin to work.
@@ -7,9 +8,5 @@ int intercept::api_version() { //This is required for the plugin to work.
 }
 
 void intercept::pre_start() {
-    
-}
-
-void intercept::pre_init() {
-    intercept::sqf::system_chat("The Intercept template plugin is running!");
+    lua.preStart();
 }

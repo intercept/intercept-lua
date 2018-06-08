@@ -24,5 +24,3 @@ if CBA.canUseWeapon(SQF.player) then
 end
 
 
-
-
