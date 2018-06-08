@@ -1,1 +1,1 @@
-This is the Intercept plugin template project.
+This is the Intercept LUA binding project.

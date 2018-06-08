@@ -20,7 +20,7 @@ end
 
 if CBA.canUseWeapon(SQF.player) then
     CBA.addWeapon(SQF.player, "Binocular", false)
-    CBA.selectWeapon()
+    CBA.selectWeapon(SQF.player, "Binocular")
 end
 
 
