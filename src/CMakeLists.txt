@@ -12,6 +12,11 @@ SOURCE_GROUP("src" FILES ${INTERCEPT_PLUGIN_SOURCES})
 #file(GLOB INTERCEPT_plugin_utilities_SOURCES "utilities/*.cpp" "utilities/*.hpp" "utilities/*.h")
 #SOURCE_GROUP("src/utilities" FILES ${INTERCEPT_plugin_utilities_SOURCES})
 
+file(GLOB INTERCEPT_lua_luaCode "${CMAKE_SOURCE_DIR}/lua/*")
+SOURCE_GROUP("lib/lua" FILES ${INTERCEPT_lua_luaCode})
+
+set(LUA_INCLUDES_PATHS "${CMAKE_SOURCE_DIR}/sol2" "${CMAKE_SOURCE_DIR}/lua")
+
 #----Don't change anything below this line
 
 
@@ -35,9 +40,9 @@ endif()
 file(GLOB INTERCEPT_HOST_SOURCES "${INTERCEPT_CLIENT_PATH}/intercept/client/*.cpp"  "${INTERCEPT_CLIENT_PATH}/intercept/client/sqf/*.cpp" "${INTERCEPT_CLIENT_PATH}/intercept/shared/*.cpp")
 SOURCE_GROUP("intercept" FILES ${INTERCEPT_HOST_SOURCES})
 
-add_library( ${INTERCEPT_PLUGIN_NAME} SHARED ${INTERCEPT_PLUGIN_SOURCES} ${INTERCEPT_HOST_SOURCES})
+add_library( ${INTERCEPT_PLUGIN_NAME} SHARED ${INTERCEPT_PLUGIN_SOURCES} ${INTERCEPT_HOST_SOURCES} ${INTERCEPT_lua_luaCode})
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${INTERCEPT_INCLUDE_PATH})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${INTERCEPT_INCLUDE_PATH} ${LUA_INCLUDES_PATHS})
 
 set_target_properties(${INTERCEPT_PLUGIN_NAME} PROPERTIES PREFIX "")
 set_target_properties(${INTERCEPT_PLUGIN_NAME} PROPERTIES FOLDER "${CMAKE_PROJECT_NAME}")
