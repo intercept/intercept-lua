@@ -1,5 +1,4 @@
 #include <intercept.hpp>
-#include <sol.hpp>
 #include "LuaManager.hpp"
 
 

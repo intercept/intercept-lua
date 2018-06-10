@@ -1,7 +1,6 @@
 #include "LuaManager.hpp"
-#include <intercept.hpp>
+#include "types.hpp"
 #include <sstream>
-using namespace intercept;
 
 types::registered_sqf_function _execLua;
 types::registered_sqf_function _compileLua;
@@ -21,7 +20,6 @@ bool CheckLuaScriptSyntax(const char* aScript, const char* aScriptName, char* aE
 
 static sqf_script_type GameDataLuaCode_type;
 LuaManager lua;
-
 
 class GameDataLuaCode : public game_data {
 
@@ -64,60 +62,18 @@ game_data* createGameDataLuaCode(param_archive* ar) {
     return x;
 }
 
-
-
-struct RV_BIND_Object {
-    RV_BIND_Object(object o) : obj(o) {}
-    object obj;
-    auto getName() const {
-        return sqf::name(obj);
-    }
-};
-
-sol::object system_chat(sol::object a, sol::this_state s) {
-    sol::state_view lua(s);
-    if (a.is<std::string>()) {
-        sqf::system_chat(a.as<std::string>());
-    }
-    return sol::make_object(lua, sol::nil);
-}
-sol::object player(sol::this_state s) {
-    sol::state_view lua(s);
-    return sol::make_object(lua, RV_BIND_Object(sqf::player()));
-}
-std::vector<sol::object> allPlayers(sol::this_state s) {
-    sol::state_view lua(s);
-    std::vector<sol::object> ret;
-    for (auto& it : sqf::all_players()) {
-        ret.emplace_back(sol::make_object(lua, it));
-    }
-    return ret;
-}
-
-sol::object getVariable(sol::object a, sol::this_state s) {
-    sol::state_view lua(s);
-    std::vector<sol::object> ret;
-    if (a.is<std::string>()) {
-        //#TODO return sol::nil if var is nil
-        return sol::make_object(lua, sqf::get_variable(sqf::mission_namespace(), a.as<std::string>()));
-    } else if (a.is<r_string>()) {
-        return sol::make_object(lua, sqf::get_variable(sqf::mission_namespace(), a.as<r_string>()));
-    }
-    return  sol::make_object(lua, sol::nil);
-}
-
 game_value executeLua(game_value_parameter leftArg, game_value_parameter rightArg) {
-    //auto source = sqf::load_file(rightArg);
+    auto source = sqf::preprocess_file(rightArg);
 
-    lua.state["_this"] = sol::make_object(lua.state, leftArg);
+    lua.state["_this"] = sol::make_object(lua.state, static_cast<game_value>(leftArg));
     try {
-        //auto result = lua.state.do_file(rightArg);
+        auto result = lua.state.safe_script(source, sol::script_default_on_error);
         //std::string ret = result;
         //return ret;
-    }
-    catch (sol::error err) {
+    } catch (sol::error err) {
         return err.what();
     }
+	return {};
 }
 
 game_value compileLua(game_value_parameter rightArg) {
@@ -278,29 +234,56 @@ void intercept::register_interfaces() {
 }
 
 
-struct lua_iterator_state {
-    typedef std::map<std::string, int>::iterator it_t;
-    compact_array<char>::const_iterator it;
-    compact_array<char>::const_iterator last;
-
-    lua_iterator_state(const r_string& mt) : it(mt.begin()), last(mt.end()) {}
-};
-
 void intercept::on_frame() {
-    lua.state["SQF"]["events"]["preInit"].tbl.for_each([](sol::object key, sol::object value) {
-       static_cast<sol::function>(value)();
-    });
+    auto result = lua.state.safe_script(" \
+        for k, v in pairs(SQF.events.PFH) do \
+            SQF.systemChat('PFH '..k); \
+            v(); \
+        end \
+        "sv, sol::script_default_on_error);
+
+    //lua.state["SQF"]["events"]["PFH"].get<sol::table>().for_each([](sol::object key, sol::object value) {
+    //    std::string name = key.as<std::string>();
+    //    intercept::sqf::system_chat("PFH " + name);
+    //    auto func = static_cast<sol::protected_function>(value);
+    //    sol::protected_function_result result = func();
+    //    result.valid();
+    //});
 }
 
 
 void intercept::pre_init() {
     intercept::sqf::system_chat("The Intercept LUA plugin is running!");
-    lua.state["SQF"]["events"]["preInit"].tbl.for_each([](sol::object key, sol::object value) {
-        intercept::sqf::system_chat("preInit "+key.as<std::string>());
-        static_cast<sol::function>(value)();
-    });
+    auto result = lua.state.safe_script(" \
+        for k, v in pairs(SQF.events.preInit) do \
+            SQF.systemChat('preInit '..k); \
+            v(); \
+        end \
+        "sv, sol::script_default_on_error);
+
+
+    //lua.state["SQF"]["events"]["preInit"].get<sol::table>().for_each([](sol::object key, sol::object value) {
+    //    intercept::sqf::system_chat("preInit "+key.as<std::string>());
+    //    auto func = static_cast<sol::protected_function>(value);
+    //    sol::protected_function_result result = func();
+    //    auto state = result.status();
+    //    result.valid();
+    //});
     intercept::sqf::system_chat("LUA preInit done.");
 }
+
+void intercept::post_init() {
+    intercept::sqf::system_chat("LUA postInit");
+    auto result = lua.state.safe_script(" \
+        for k, v in pairs(SQF.events.postInit) do \
+            SQF.systemChat('preInit '..k); \
+            v(); \
+        end \
+        "sv, sol::script_default_on_error);
+
+    intercept::sqf::system_chat("LUA postInit done.");
+}
+
 
 void LuaManager::preStart() {
     auto codeType = client::host::register_sqf_type(r_string("LUACODE"), r_string("luaCode"), r_string("Dis is LUA!"), r_string("luaCode"), createGameDataLuaCode);
@@ -311,149 +294,41 @@ void LuaManager::preStart() {
     _callLuaString = client::host::register_sqf_command("callLUA"sv, "Call Named lua function in global Namespace"sv, userFunctionWrapper<callLua_String>, game_data_type::ANY, game_data_type::ANY, game_data_type::STRING);
     _callLuaCodeArgs = client::host::register_sqf_command("call"sv, "Call compiled lua code"sv, userFunctionWrapper<callLua_Code>, game_data_type::ANY, game_data_type::ANY, codeType.first);
     _callLuaCode = client::host::register_sqf_command("call"sv, "Call compiled lua codesv", userFunctionWrapper<callLua_Code>, game_data_type::ANY, codeType.first);
-
-    //state.open_libraries();
-
-    //https://github.com/ThePhD/sol2/issues/332
-    //https://github.com/ThePhD/sol2/issues/90
-    auto SQF = sol::table();
-
-    SQF["missionNamespace"] = sqf::mission_namespace();
-    SQF["createVehicle"] = [](r_string classname, sol::table pos) {
-        return RV_BIND_Object(sqf::create_vehicle(classname, {pos[0], pos[1], pos[2] }));
-    };
-    SQF["player"] = sol::property([]() {
-        return RV_BIND_Object(sqf::player());
-    });
-
-    SQF["systemChat"] = [](r_string message) {
-        sqf::system_chat(message);
-    };
-
-    state["SQF"] = SQF;
-    state.create_table("SQF_PFH");
-
-    lua.state.new_usertype<r_string>("string",
-        sol::constructors<sol::types<>, sol::types<const char*>, sol::types<std::string>, sol::types<std::string_view>>(),
-        "size", sol::property(&r_string::size),
-        sol::meta_function::to_string, [](const r_string &s) { return s.data(); },
-        sol::meta_function::index, [](const r_string &s, size_t i) { return s.data()[i - 1]; },//#TODO add at operator
-        "begin", [](const r_string &s) { return s.begin(); },
-        "append", sol::overload(
-            [](r_string &self, const r_string &other) { self += other; },
-            [](r_string &self, const std::string &other) { self += other; },
-           [](r_string &self, const char *suffix) { self += suffix; }
-        )
-        );
-
-
-
-    //state["getVariable"] = &getVariable;
-    //state["allPlayers"] = &allPlayers;
-    //state["player"] = &player;
-    //https://github.com/actboy168/vscode-lua-debug
-    //https://github.com/ThePhD/sol2/issues/327
-    lua.state.new_usertype<r_string>("string",
-        sol::constructors<sol::types<>, sol::types<const char*>, sol::types<std::string>, sol::types<std::string_view>>(),
-        "size", &r_string::size,
-        sol::meta_function::to_string, [](const r_string &s) { return s.data(); },
-        sol::meta_function::index, [](const r_string &s, size_t i) { return s.data()[i - 1]; },//#TODO add at operator
-        "begin", [](const r_string &s) { return s.begin(); },
-        "append", sol::overload(
-                [](r_string &self, const r_string &other) { self += other; },
-                [](r_string &self, const std::string &other) { self += other; },
-                [](r_string &self, const char *suffix) { self += suffix; }
-            )
-        );
-
-
-    lua.state.new_usertype<RV_BIND_Object>("object",
-        //sol::constructors<sol::types<>, sol::types<const char*>, sol::types<std::string>, sol::types<std::string_view>>(),
-        //"size", &r_string::size,
-        sol::meta_function::to_string, [](const RV_BIND_Object &s) { return static_cast<r_string>(s.obj); },
-        //sol::meta_function::index, [](const r_string &s, size_t i) { return s.data()[i - 1]; },//#TODO add at operator
-        "getPosASL", [](const RV_BIND_Object &s) { return sqf::get_pos_asl(s.obj); },
-        "positionASL", sol::property(
-            [](const RV_BIND_Object &s) { return sqf::get_pos_asl(s.obj); }, 
-            [](const RV_BIND_Object &s, vector3 pos) { return sqf::set_pos_asl(s.obj, pos); }),
-        "setDir", [](const RV_BIND_Object &s, double dir) { return sqf::set_dir(s.obj, dir); },
-        "name", [](const RV_BIND_Object &s){ return sqf::name(s.obj); },
-        "getVariable", [](const RV_BIND_Object &s, const r_string& other) { return sqf::get_variable(s.obj, other); }
-        );
-
-    lua.state.new_usertype<rv_namespace>("namespace",
-        "name", [](const rv_namespace &s) { return sqf::str(s); },
-        "getVariable", [](const rv_namespace &s, const r_string& other) {
-                auto var = sqf::get_variable(s, other);
-                if (var.type_enum() == game_data_type::CODE)
-                    return sol::make_object(lua.state,static_cast<code>(var));
-        
-                return sol::make_object(lua.state, var);
-    }
-    );
-
-    //Generic game_value type. Could be complex. This type should be returned as little as possible
-    lua.state.new_usertype<game_value>("game_value",
-        sol::meta_function::to_string, [](const game_value &s) { return static_cast<r_string>(s); },
-        "type", [](const game_value &s) {
-            return s.type_enum();
-        }
-    );
-
-    lua.state.new_enum("VariableType"sv,
-        "SCALAR", types::game_data_type::SCALAR,
-        "BOOL", types::game_data_type::BOOL,
-        "ARRAY", types::game_data_type::ARRAY,
-        "STRING", types::game_data_type::STRING,
-        "NOTHING", types::game_data_type::NOTHING,
-        "ANY", types::game_data_type::ANY,
-        "NAMESPACE", types::game_data_type::NAMESPACE,
-        "NaN", types::game_data_type::NaN,
-        "CODE", types::game_data_type::CODE,
-        "OBJECT", types::game_data_type::OBJECT,
-        "SIDE", types::game_data_type::SIDE,
-        "GROUP", types::game_data_type::GROUP,
-        "TEXT", types::game_data_type::TEXT,
-        "SCRIPT", types::game_data_type::SCRIPT,
-        "TARGET", types::game_data_type::TARGET,
-        "CONFIG", types::game_data_type::CONFIG,
-        "DISPLAY", types::game_data_type::DISPLAY,
-        "CONTROL", types::game_data_type::CONTROL,
-        "NetObject", types::game_data_type::NetObject,
-        "SUBGROUP", types::game_data_type::SUBGROUP,
-        "TEAM_MEMBER", types::game_data_type::TEAM_MEMBER,
-        "TASK", types::game_data_type::TASK,
-        "DIARY_RECORD", types::game_data_type::DIARY_RECORD,
-        "LOCATION", types::game_data_type::LOCATION
-        );
-
-
-    lua.state.new_usertype<code>("code",
-        sol::meta_function::call, [](const code &s) { return sqf::call(s); },
-        sol::meta_function::call, [](const code &s, sol::variadic_args va) {
-            auto_array<game_value> args;
-            for (auto& it : va)
-                args.emplace_back(it);
-            return sqf::call(s, args);
-        }
-        );
-
-    lua.state.new_usertype<vector3>("vector3"
-    //#TODO fill?
-    );
-
-
-
+    static auto _rebuildLibraries = client::host::register_sqf_command("rebuildLuaLibraries"sv, "", [](uintptr_t gs) -> game_value {
 
         for (auto& it : sqf::config_classes("true"sv, sqf::config_entry() >> "CfgLuaLibraries"sv)) {
             if (sqf::is_text(sqf::config_entry(it) >> "init"sv)) {
                 auto fileName = sqf::get_text(sqf::config_entry(it) >> "init"sv);
-                std::string code(sqf::preprocess_file(fileName));
-                auto result = lua.state.load_buffer(code.c_str(), code.length(), sqf::config_name(it).c_str());
-                if (result.valid())
-                    result.get<sol::protected_function>()();
+                auto code = sqf::preprocess_file(fileName);
+                auto result = lua.state.safe_script(code, sol::script_default_on_error, sqf::config_name(it).c_str());
             }
         }
+
+        return {};
+    }, game_data_type::NOTHING);
+
+    state.open_libraries();
+
+    //state["getVariable"] = &getVariable;
+    //state["allPlayers"] = &allPlayers;
+    //state["player"] = &player;
+
+    initTypes(state);
+
+    auto events = state["SQF"].get<sol::table>().create("events");
+
+    events.create("PFH");
+    events.create("preInit");
+    events.create("postInit");
+
+
+    for (auto& it : sqf::config_classes("true"sv, sqf::config_entry() >> "CfgLuaLibraries"sv)) {
+        if (sqf::is_text(sqf::config_entry(it) >> "init"sv)) {
+            auto fileName = sqf::get_text(sqf::config_entry(it) >> "init"sv);
+            auto code = sqf::preprocess_file(fileName);
+            lua.state.safe_script(code, sol::script_default_on_error, sqf::config_name(it).c_str());
+        }
+    }
 
     //lua.state.do_file("P:\\test.luac");
 
